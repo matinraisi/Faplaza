@@ -31,7 +31,7 @@ class ScrapeView(APIView):
 
         try:
             # ارسال درخواست به API خارجی
-            response = requests.post('http://185.80.196.109:5049/scrape', json={
+            response = requests.post('http://188.165.62.242:5049/scrape', json={
                 "url": url,
                 "color": color,
                 "size": size,
