@@ -6,14 +6,6 @@ import requests
 import json
 from .models import ScrapeData
 from price.models import ExchangeRate
-from selenium.common.exceptions import (NoSuchElementException as NSEE, TimeoutException as TOE, 
-                                         NoSuchWindowException as NSWE, WebDriverException)
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from selenium.webdriver.common.action_chains import ActionChains
-from selenium import webdriver
-from webdriver_manager.chrome import ChromeDriverManager
-from selenium.webdriver.chrome.service import Service
 from playwright.sync_api import sync_playwright
 
 class ScrapeView(APIView):
@@ -195,7 +187,7 @@ def namshi(url):
             page.close()
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)  # Launch headless browser
+        browser = p.chromium.launch(headless=False)  # Launch headless browser
         try:
             return products(browser)
         finally:
