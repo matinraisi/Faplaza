@@ -7,7 +7,14 @@ import json
 from .models import ScrapeData
 from price.models import ExchangeRate
 from playwright.sync_api import sync_playwright
-
+from selenium.common.exceptions import (NoSuchElementException as NSEE, TimeoutException as TOE, 
+                                         NoSuchWindowException as NSWE, InvalidArgumentException as IAE, WebDriverException)
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.action_chains import ActionChains
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium import webdriver
 class ScrapeView(APIView):
 
     def post(self, request, *args, **kwargs):
@@ -148,28 +155,74 @@ class ScrapeNamshiView(APIView):
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 def namshi(url):
-    def products(browser):
-        page = browser.new_page()
-        page.set_default_timeout(60000)  # Set timeout to 60 seconds
+    driver = None
 
+    def driver_init():
+        nonlocal driver
+        options = Options()
+        options.add_argument("--headless")
+        options.add_argument('--enable-gpu')  # Enable GPU for better rendering
+        options.add_argument('--no-sandbox')  # Required for certain environments (optional)
+        # options.add_argument("--disable-gpu")
+        # options.add_argument("start-maximized")
+        # options.add_argument("disable-infobars")
+        # options.add_argument("--disable-extensions")
+        # options.add_argument('--disable-dev-shm-usage')
+        options.add_argument('--window-size=1920,1080')
+        options.add_argument("--disable-dev-shm-usage")
+        options.add_argument("--disable-popup-blocking")
+        options.add_argument('--ignore-certificate-errors')
+        options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36')
         try:
-            page.goto(url)
-            page.wait_for_selector('h1')  # Wait for the title to ensure the page has loaded
-            
-            brand = page.query_selector('.ProductConversion_brand__Y76P_').inner_text().strip()
-            name = page.query_selector('h1').inner_text().strip()
-            price = page.query_selector('section span span:nth-child(2)').inner_text().replace('\n', ' ')
+            driver = webdriver.Chrome(options=options)
+            driver.set_page_load_timeout(60)
+            driver.get(url)
+            print('Finding End ...')
+            end = driver.find_element(By.XPATH, '/html/body/section/section/section/div[2]/div[1]/div/div/div[1]')
+            actions = ActionChains(driver)
+            actions.scroll_to_element(end).perform()
+        except (TOE, WebDriverException) as e:
+            print(f"Error initializing the driver: {e}")
+            if driver:
+                driver.quit()
+            raise
+        return driver
 
-            size_elements = page.query_selector_all('.SizePills_size_variant__4qpXf')
-            size = [size.inner_text().strip() for size in size_elements]
+    def products():
+        try:
+            print('Locating Brand ...')
+            brand = driver.find_element(By.CLASS_NAME, 'ProductConversion_brand__Y76P_').text.strip()
+            print('Locating Name ...')
+            name = driver.find_element(By.XPATH, '/html/body/section/section/section/section/div/div[2]/section[1]/section[1]/div/div[1]/h1').text.strip()
+            print('Locating Price ...')
+            price = driver.find_element(By.XPATH, '/html/body/section/section/section/section/div/div[2]/section[1]/section[1]/section/div[1]/section/span/span[2]').text.replace('\n', ' ')
+
+            print('Finding Size_Div ...')
+            size_div = driver.find_elements(By.XPATH, '/html/body/section/section/section/section/div/div[2]/section[1]/div[1]/div[2]/div')
+            print('Locating Sizes ...')
+            size = [_.text.strip() for size1 in size_div for _ in size1.find_elements(By.CLASS_NAME, 'SizePills_size_variant__4qpXf')]
 
             color = []
             color_page = []
-            color_elements = page.query_selector_all('.ProductConversion_groupImages__4tRb8 img')
-            color.extend([color_elem.get_attribute('src') for color_elem in color_elements])
+            try:
+                print('Locating Color_Big_Div ...')
+                color_big_div = driver.find_elements(By.CLASS_NAME, 'ProductConversion_groupImages__4tRb8')
+                print('Locating Colors ...')
+                for m in color_big_div:
+                    color_mid_div = m.find_elements(By.TAG_NAME, 'img')
+                    color.extend([color1.get_property("src") for color1 in color_mid_div])
+                print('Locating Page_colors ...')
+                pag = [page.get_property('href') for pg in color_big_div for page in pg.find_elements(By.TAG_NAME, 'a')]
+                color_page.extend(pag)
+            except NSEE:
+                pass
 
-            picture_elements = page.query_selector_all('.ImageGallery_container__cNIDV img')
-            picture = [pic_elem.get_attribute('src') for pic_elem in picture_elements]
+            picture = []
+            print('Locating Pictures ...')
+            picture_div = driver.find_elements(By.CLASS_NAME, 'ImageGallery_container__cNIDV')
+            for pic1 in picture_div:
+                pic2 = pic1.find_elements(By.TAG_NAME, 'img')
+                picture.extend([pic3.get_property('src') for pic3 in pic2])
 
             return {
                 'brand': brand,
@@ -177,21 +230,20 @@ def namshi(url):
                 'price': price,
                 'size': size,
                 'color_source': color,
+                'color_pages': color_page,
                 'picture': picture,
             }
 
-        except Exception as e:
+        except (NSEE, NSWE, TOE, Exception) as e:
             print(f"An unexpected error occurred: {e}")
-            return None
-        finally:
-            page.close()
+            raise
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=False)  # Launch headless browser
-        try:
-            return products(browser)
-        finally:
-            browser.close()
+    driver_init()
+    try:
+        return products()
+    finally:
+        if driver:
+            driver.quit()
 
 class ScrapeDataDetailView(APIView):
     def get(self, request, *args, **kwargs):
